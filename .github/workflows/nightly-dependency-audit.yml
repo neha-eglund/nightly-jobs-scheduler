@@ -1,0 +1,94 @@
+name: Nightly Dependency Audit
+
+# Duplicate of claude-github-demo's nightly-dependency-audit.yml.
+# Checks out the Java project from TARGET_REPO, runs OWASP scan,
+# then uses Claude to triage findings and create issues.
+
+on:
+  workflow_dispatch:
+  workflow_call:
+
+jobs:
+  audit:
+    name: OWASP Dependency Audit
+    runs-on: self-hosted
+    permissions:
+      contents: read
+      issues: write
+      id-token: write
+
+    steps:
+      - name: Checkout Java project (${{ vars.TARGET_REPO }})
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.TARGET_REPO }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Java 24
+        uses: actions/setup-java@v4
+        with:
+          java-version: '24'
+          distribution: 'temurin'
+          cache: maven
+
+      - name: Set weekly cache key
+        run: echo "WEEK=$(date -u +%Y-W%V)" >> "$GITHUB_ENV"
+
+      - name: Cache NVD database
+        uses: actions/cache@v4
+        with:
+          path: ~/.dependency-check/data
+          key: nvd-db-${{ runner.os }}-${{ env.WEEK }}
+          restore-keys: nvd-db-${{ runner.os }}-
+
+      - name: Run OWASP Dependency-Check
+        env:
+          NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
+        run: |
+          MVN_ARGS="-DfailBuildOnCVSS=11 -Dformat=JSON -DprettyPrint=true"
+          MVN_ARGS="$MVN_ARGS -DdataDirectory=$HOME/.dependency-check/data"
+          MVN_ARGS="$MVN_ARGS -DskipTestScope=false"
+          if [ -n "$NVD_API_KEY" ]; then
+            MVN_ARGS="$MVN_ARGS -DnvdApiKey=$NVD_API_KEY"
+          fi
+          mvn org.owasp:dependency-check-maven:check $MVN_ARGS --no-transfer-progress
+        continue-on-error: true
+
+      - name: Upload full report artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dependency-check-report-${{ github.run_number }}
+          path: target/dependency-check-report.json
+          retention-days: 30
+
+      - name: Triage findings with Claude and create issues
+        if: always()
+        uses: anthropics/claude-code-action@v1
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_args: >-
+            --allowed-tools
+            Bash(cat:*),Bash(jq:*),Bash(gh issue create:*),Bash(gh issue list:*)
+          prompt: |
+            You are a dependency security analyst for ${{ vars.TARGET_REPO }}.
+
+            Read the OWASP Dependency-Check report at:
+              target/dependency-check-report.json
+
+            The JSON structure is:
+              .dependencies[].vulnerabilities[]
+              Each vulnerability has: .name (CVE), .severity, .cvssv3.baseScore, .description
+
+            Steps:
+            1. Extract all CRITICAL (CVSS >= 9.0) and HIGH (CVSS >= 7.0) findings.
+            2. For each, check whether an issue already exists:
+               gh issue list --repo ${{ vars.TARGET_REPO }} --search "<CVE-ID>" --json number --jq length
+            3. Create a GitHub issue for each unique HIGH/CRITICAL CVE not already reported:
+               - Title: "[Dependency] <CVE-ID> — <affected library> (<severity>)"
+               - Labels: dependency-vulnerability, <critical or high>
+               - Body: CVE, affected dependency + version, CVSS score, description, remediation
+            4. Post a step summary to $GITHUB_STEP_SUMMARY.
+          show_full_output: true

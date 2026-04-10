@@ -1,0 +1,89 @@
+name: Nightly PR Review
+
+# Duplicate of claude-github-demo's nightly-pr-review.yml.
+# Reviews PRs in TARGET_REPO using Claude, running on the self-hosted runner.
+
+on:
+  workflow_dispatch:
+  workflow_call:
+
+jobs:
+  list-open-prs:
+    name: List open pull requests
+    runs-on: self-hosted
+    permissions:
+      pull-requests: read
+    outputs:
+      pr_numbers: ${{ steps.list.outputs.pr_numbers }}
+
+    steps:
+      - name: Fetch open non-draft PR numbers
+        id: list
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PR_NUMBERS=$(gh pr list \
+            --repo "${{ vars.TARGET_REPO }}" \
+            --state open \
+            --json number,isDraft \
+            --jq '[.[] | select(.isDraft == false) | .number]')
+          echo "pr_numbers=$PR_NUMBERS" >> "$GITHUB_OUTPUT"
+          echo "PRs to review: $PR_NUMBERS"
+
+  review-pr:
+    name: Review PR #${{ matrix.pr_number }}
+    needs: list-open-prs
+    if: needs.list-open-prs.outputs.pr_numbers != '[]'
+    runs-on: self-hosted
+    strategy:
+      matrix:
+        pr_number: ${{ fromJson(needs.list-open-prs.outputs.pr_numbers) }}
+      fail-fast: false
+      max-parallel: 3
+
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: read
+      id-token: write
+      actions: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Review PR with Claude
+        uses: anthropics/claude-code-action@v1
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_args: >-
+            --allowed-tools
+            Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr review:*),Bash(gh issue create:*),Bash(gh issue list:*),Read
+          prompt: |
+            Review PR #${{ matrix.pr_number }} in repository ${{ vars.TARGET_REPO }}.
+
+            Steps:
+            1. Read the PR metadata:
+               gh pr view ${{ matrix.pr_number }} --repo ${{ vars.TARGET_REPO }} --json title,body,author,files,labels
+            2. Read the full diff:
+               gh pr diff ${{ matrix.pr_number }} --repo ${{ vars.TARGET_REPO }}
+            3. Read CLAUDE.md for the "Code Review Rules" section — it defines severity labels
+               ([BLOCKING] / [ADVISORY] / [NIT]) and rules across security, test quality,
+               CI/workflow, and code style.
+
+            Known intentional failures — do NOT flag these as bugs:
+            - Stripe SSRF tests fail in CI by design
+            - IDOR / session tests fail against staging — the API has those vulnerabilities
+
+            4. Write a review with all findings grouped by [BLOCKING] / [ADVISORY] / [NIT],
+               each with the file and line.
+
+            5. Post the review:
+               - Any [BLOCKING]: gh pr review ${{ matrix.pr_number }} --repo ${{ vars.TARGET_REPO }} --request-changes --body "<review>"
+               - Only [ADVISORY]/[NIT]: gh pr review ${{ matrix.pr_number }} --repo ${{ vars.TARGET_REPO }} --comment --body "<review>"
+               - No findings: gh pr review ${{ matrix.pr_number }} --repo ${{ vars.TARGET_REPO }} --approve --body "LGTM — no issues found."
+          show_full_output: true
