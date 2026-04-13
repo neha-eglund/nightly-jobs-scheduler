@@ -50,19 +50,17 @@ jobs:
     with:
       target_repo: ${{ vars.TARGET_REPO }}
 
-  # dependency-audit disabled — Claude Code app not installed on target repo
-  # Re-enable by restoring the if condition once the app is configured.
-  # dependency-audit:
-  #   name: Dependency Audit
-  #   if: ${{ github.event_name == 'schedule' || inputs.run_dependency_audit == true }}
-  #   uses: ./.github/workflows/nightly-dependency-audit.yml
-  #   secrets: inherit
-  #   with:
-  #     target_repo: ${{ vars.TARGET_REPO }}
+  dependency-audit:
+    name: Dependency Audit
+    if: ${{ github.event_name == 'schedule' || inputs.run_dependency_audit == true }}
+    uses: ./.github/workflows/nightly-dependency-audit.yml
+    secrets: inherit
+    with:
+      target_repo: ${{ vars.TARGET_REPO }}
 
   morning-briefing:
     name: Morning Briefing
-    needs: [pentest, pr-review]
+    needs: [pentest, pr-review, dependency-audit]
     if: always()
     runs-on: self-hosted
     permissions:
@@ -91,6 +89,7 @@ jobs:
 
           PENTEST_ICON=$(result_icon "${{ needs.pentest.result }}")
           PR_ICON=$(result_icon "${{ needs.pr-review.result }}")
+          AUDIT_ICON=$(result_icon "${{ needs.dependency-audit.result }}")
 
           {
             echo "## 🌙 Nightly AI Orchestrator — $(date -u +%Y-%m-%d)"
@@ -99,6 +98,7 @@ jobs:
             echo "|-----|--------|"
             echo "| Payment API Pentest | $PENTEST_ICON \`${{ needs.pentest.result }}\` |"
             echo "| PR Review           | $PR_ICON \`${{ needs.pr-review.result }}\` |"
+            echo "| Dependency Audit    | $AUDIT_ICON \`${{ needs.dependency-audit.result }}\` |"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Create morning briefing with Claude
@@ -114,9 +114,10 @@ jobs:
             You are the morning briefing agent for ${{ vars.TARGET_REPO }}.
             Today's date: $(date -u +%Y-%m-%d).
 
-            The two nightly jobs have just completed:
-            - Pentest:    ${{ needs.pentest.result }}
-            - PR Review:  ${{ needs.pr-review.result }}
+            The three nightly jobs have just completed:
+            - Pentest:           ${{ needs.pentest.result }}
+            - PR Review:         ${{ needs.pr-review.result }}
+            - Dependency Audit:  ${{ needs.dependency-audit.result }}
 
             1. Check if today's briefing issue already exists:
                gh issue list --repo ${{ vars.TARGET_REPO }} --search "Nightly AI Report $(date -u +%Y-%m-%d)" --json number --jq length
