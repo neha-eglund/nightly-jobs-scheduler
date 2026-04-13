@@ -17,6 +17,7 @@ jobs:
   audit:
     name: OWASP Dependency Audit
     runs-on: self-hosted
+    timeout-minutes: 20
     permissions:
       contents: read
       issues: write
@@ -69,6 +70,7 @@ jobs:
 
       - name: Triage findings with Claude and create issues
         if: always()
+        timeout-minutes: 10
         uses: anthropics/claude-code-action@v1
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
