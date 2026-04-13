@@ -6,6 +6,11 @@ name: Nightly PR Review
 on:
   workflow_dispatch:
   workflow_call:
+    inputs:
+      target_repo:
+        description: 'GitHub repo to review PRs in (owner/repo)'
+        type: string
+        required: true
 
 jobs:
   list-open-prs:
@@ -23,7 +28,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           PR_NUMBERS=$(gh pr list \
-            --repo "${{ vars.TARGET_REPO }}" \
+            --repo "${{ inputs.target_repo || vars.TARGET_REPO }}" \
             --state open \
             --json number,isDraft \
             --jq '[.[] | select(.isDraft == false) | .number]')
@@ -64,13 +69,13 @@ jobs:
             --allowed-tools
             Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr review:*),Bash(gh issue create:*),Bash(gh issue list:*),Read
           prompt: |
-            Review PR #${{ matrix.pr_number }} in repository ${{ vars.TARGET_REPO }}.
+            Review PR #${{ matrix.pr_number }} in repository ${{ inputs.target_repo || vars.TARGET_REPO }}.
 
             Steps:
             1. Read the PR metadata:
-               gh pr view ${{ matrix.pr_number }} --repo ${{ vars.TARGET_REPO }} --json title,body,author,files,labels
+               gh pr view ${{ matrix.pr_number }} --repo ${{ inputs.target_repo || vars.TARGET_REPO }} --json title,body,author,files,labels
             2. Read the full diff:
-               gh pr diff ${{ matrix.pr_number }} --repo ${{ vars.TARGET_REPO }}
+               gh pr diff ${{ matrix.pr_number }} --repo ${{ inputs.target_repo || vars.TARGET_REPO }}
             3. Read CLAUDE.md for the "Code Review Rules" section — it defines severity labels
                ([BLOCKING] / [ADVISORY] / [NIT]) and rules across security, test quality,
                CI/workflow, and code style.
@@ -83,7 +88,7 @@ jobs:
                each with the file and line.
 
             5. Post the review:
-               - Any [BLOCKING]: gh pr review ${{ matrix.pr_number }} --repo ${{ vars.TARGET_REPO }} --request-changes --body "<review>"
-               - Only [ADVISORY]/[NIT]: gh pr review ${{ matrix.pr_number }} --repo ${{ vars.TARGET_REPO }} --comment --body "<review>"
-               - No findings: gh pr review ${{ matrix.pr_number }} --repo ${{ vars.TARGET_REPO }} --approve --body "LGTM — no issues found."
+               - Any [BLOCKING]: gh pr review ${{ matrix.pr_number }} --repo ${{ inputs.target_repo || vars.TARGET_REPO }} --request-changes --body "<review>"
+               - Only [ADVISORY]/[NIT]: gh pr review ${{ matrix.pr_number }} --repo ${{ inputs.target_repo || vars.TARGET_REPO }} --comment --body "<review>"
+               - No findings: gh pr review ${{ matrix.pr_number }} --repo ${{ inputs.target_repo || vars.TARGET_REPO }} --approve --body "LGTM — no issues found."
           show_full_output: true

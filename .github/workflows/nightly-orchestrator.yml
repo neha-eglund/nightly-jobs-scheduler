@@ -1,4 +1,4 @@
-name: Nightly AI Orchestrator
+name: Nightly AI Orchestrator (AWS Runner)
 
 # Duplicate of claude-github-demo's nightly-orchestrator.yml.
 # Runs on a self-hosted EC2 runner provisioned by infra/ec2.tf.
@@ -39,18 +39,24 @@ jobs:
     if: ${{ github.event_name == 'schedule' || inputs.run_pentest == true }}
     uses: ./.github/workflows/nightly-pentest.yml
     secrets: inherit
+    with:
+      target_repo: ${{ vars.TARGET_REPO }}
 
   pr-review:
     name: PR Review
     if: ${{ github.event_name == 'schedule' || inputs.run_pr_review == true }}
     uses: ./.github/workflows/nightly-pr-review.yml
     secrets: inherit
+    with:
+      target_repo: ${{ vars.TARGET_REPO }}
 
   dependency-audit:
     name: Dependency Audit
     if: ${{ github.event_name == 'schedule' || inputs.run_dependency_audit == true }}
     uses: ./.github/workflows/nightly-dependency-audit.yml
     secrets: inherit
+    with:
+      target_repo: ${{ vars.TARGET_REPO }}
 
   morning-briefing:
     name: Morning Briefing

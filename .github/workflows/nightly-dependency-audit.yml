@@ -7,6 +7,11 @@ name: Nightly Dependency Audit
 on:
   workflow_dispatch:
   workflow_call:
+    inputs:
+      target_repo:
+        description: 'GitHub repo containing the Java project (owner/repo)'
+        type: string
+        required: true
 
 jobs:
   audit:
@@ -21,7 +26,7 @@ jobs:
       - name: Checkout Java project (${{ vars.TARGET_REPO }})
         uses: actions/checkout@v4
         with:
-          repository: ${{ vars.TARGET_REPO }}
+          repository: ${{ inputs.target_repo || vars.TARGET_REPO }}
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Java 24
