@@ -26,10 +26,10 @@ resource "aws_security_group" "runner" {
 # User data — runs once on first boot.
 # Installs all tooling (Java 24, Maven, gh CLI) and registers the runner as a systemd service.
 locals {
-  user_data = <<-SHELL
-    #!/usr/bin/env bash
-    set -x
-    exec > /var/log/runner-init.log 2>&1
+  user_data = <<SHELL
+#!/usr/bin/env bash
+set -x
+exec > /var/log/runner-init.log 2>&1
 
     echo "=== STEP 1: System packages ==="
     export DEBIAN_FRONTEND=noninteractive
@@ -130,6 +130,8 @@ ExecStart=/opt/actions-runner/run.sh
 Restart=always
 RestartSec=10
 KillMode=process
+StandardOutput=append:/var/log/github-runner.log
+StandardError=append:/var/log/github-runner.log
 
 [Install]
 WantedBy=multi-user.target
@@ -140,8 +142,19 @@ EOF
     systemctl start github-runner
     systemctl status github-runner --no-pager
 
+    echo "=== STEP 11: CloudWatch agent ==="
+    curl -fsSL https://amazoncloudwatch-agent.s3.amazonaws.com/ubuntu/amd64/latest/amazon-cloudwatch-agent.deb \
+      -o /tmp/cwagent.deb && dpkg -i /tmp/cwagent.deb && rm /tmp/cwagent.deb
+
+    echo '{"logs":{"logs_collected":{"files":{"collect_list":[{"file_path":"/var/log/runner-init.log","log_group_name":"/nightlyjobs/runner-init","log_stream_name":"{instance_id}","retention_in_days":7},{"file_path":"/var/log/github-runner.log","log_group_name":"/nightlyjobs/runner","log_stream_name":"{instance_id}","retention_in_days":7},{"file_path":"/opt/actions-runner/_diag/Worker_*.log","log_group_name":"/nightlyjobs/runner-worker","log_stream_name":"{instance_id}","retention_in_days":7}]}}}}' \
+      > /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json
+
+    /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl \
+      -a fetch-config -m ec2 \
+      -c file:/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json -s
+
     echo "=== Bootstrap complete — runner is online ==="
-  SHELL
+SHELL
 }
 
 resource "aws_instance" "runner" {
