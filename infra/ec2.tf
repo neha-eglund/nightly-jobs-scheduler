@@ -31,10 +31,18 @@ locals {
 set -x
 exec > /var/log/runner-init.log 2>&1
 
+    echo "=== STEP 0: Swap (2 GB) ==="
+    fallocate -l 2G /swapfile
+    chmod 600 /swapfile
+    mkswap /swapfile
+    swapon /swapfile
+    echo '/swapfile none swap sw 0 0' >> /etc/fstab
+    free -h
+
     echo "=== STEP 1: System packages ==="
     export DEBIAN_FRONTEND=noninteractive
-    apt-get update -q
-    apt-get install -y --no-install-recommends \
+    nice -n 10 apt-get update -q
+    nice -n 10 apt-get install -y --no-install-recommends \
       curl ca-certificates git jq unzip python3 || { echo "FAILED: apt packages"; exit 1; }
 
     echo "=== STEP 2: AWS CLI v2 ==="
@@ -49,12 +57,12 @@ exec > /var/log/runner-init.log 2>&1
       | gpg --dearmor -o /etc/apt/keyrings/adoptium.gpg
     echo "deb [signed-by=/etc/apt/keyrings/adoptium.gpg] https://packages.adoptium.net/artifactory/deb noble main" \
       > /etc/apt/sources.list.d/adoptium.list
-    apt-get update -q
-    apt-get install -y temurin-24-jdk || { echo "FAILED: temurin install"; exit 1; }
+    nice -n 10 apt-get update -q
+    nice -n 10 apt-get install -y temurin-24-jdk || { echo "FAILED: temurin install"; exit 1; }
     java -version
 
     echo "=== STEP 4: Maven ==="
-    apt-get install -y --no-install-recommends maven || { echo "FAILED: maven install"; exit 1; }
+    nice -n 10 apt-get install -y --no-install-recommends maven || { echo "FAILED: maven install"; exit 1; }
     mvn -version
 
     echo "=== STEP 5: GitHub CLI ==="
