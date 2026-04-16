@@ -55,6 +55,72 @@ Two `TestExecutionListener` implementations are auto-registered via `META-INF/se
 - `PentestReportSummary` → `target/pentest-reports/summary.txt` and the Actions job summary tab
 - `GithubIssueReporter` → creates GitHub issues for High/Medium findings when `PENTEST_CREATE_ISSUES=true`
 
+### AWS EC2 Self-Hosted Runner
+
+The nightly jobs run on a self-hosted EC2 runner provisioned by Terraform (`infra/`). It replaces the default `ubuntu-latest` GitHub-hosted runner.
+
+```
+GitHub Actions (neha-eglund/nightly-jobs-scheduler)
+        |
+        | workflow_dispatch / cron 02:00 UTC
+        v
+nightly-orchestrator.yml
+        |
+        | runs-on: self-hosted (label: nightlyjobs)
+        v
+  ┌─────────────────────────────────────┐
+  │  EC2 t3.micro  (eu-north-1)         │
+  │  Ubuntu 24.04 + 2 GB swap           │
+  │                                     │
+  │  /opt/actions-runner/               │
+  │    run.sh  ←──── github-runner      │
+  │                  systemd service    │
+  │                                     │
+  │  Secrets read from SSM:             │
+  │    /nightlyjobs/github-pat          │
+  │    /nightlyjobs/github-repo         │
+  └──────────────┬──────────────────────┘
+                 │ logs
+                 v
+         CloudWatch Logs (eu-north-1)
+           /nightlyjobs/runner-init   ← bootstrap output
+           /nightlyjobs/runner        ← job start/complete/result
+           /nightlyjobs/runner-worker ← full step output + errors
+```
+
+**Infra files:**
+
+| File | Purpose |
+|---|---|
+| `infra/ec2.tf` | EC2 instance + security group + bootstrap user_data |
+| `infra/iam.tf` | IAM role: SSM access, SSM parameter read, CloudWatch write |
+| `infra/ssm.tf` | SSM parameters storing PAT and target repo |
+| `infra/variables.tf` | Region, instance type, runner name/labels/version |
+| `infra/terraform.tfvars` | Actual values (git-ignored for PAT) |
+
+**Key operational notes:**
+- Bootstrap script uses `<<SHELL` heredoc (not `<<-SHELL`) — the `-` variant strips tabs only; space-indented shebang breaks cloud-init silently
+- 2 GB swap file at `/swapfile` — needed because OWASP Dependency-Check OOMs on 1 GB RAM
+- `user_data_replace_on_change = true` — any change to user_data replaces the instance automatically on `terraform apply`
+- Runner registers to `neha-eglund/nightly-jobs-scheduler` with labels `self-hosted,linux,x64,nightlyjobs`
+- CloudWatch agent ships 3 log groups; 7-day retention keeps costs within free tier
+
+**To rebuild the runner:**
+```bash
+cd infra && terraform apply
+```
+
+**To check runner status:**
+```bash
+gh api repos/neha-eglund/nightly-jobs-scheduler/actions/runners --jq '.runners[] | {name,status,busy}'
+```
+
+**To tail logs live:**
+```bash
+aws logs tail /nightlyjobs/runner --follow --region eu-north-1
+aws logs tail /nightlyjobs/runner-worker --follow --region eu-north-1
+```
+
 ### Workflow entry points
 
 | Workflow | Trigger | Purpose |
