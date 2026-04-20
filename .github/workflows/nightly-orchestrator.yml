@@ -130,3 +130,65 @@ jobs:
                Title: "🌙 Nightly AI Report — $(date -u +%Y-%m-%d)"
                Labels: nightly-report
           show_full_output: true
+
+      - name: Send Slack notification
+        if: always()
+        run: |
+          result_icon() {
+            case "$1" in
+              success)   echo "✅" ;;
+              failure)   echo "❌" ;;
+              cancelled) echo "⏹️" ;;
+              skipped)   echo "⏭️" ;;
+              *)         echo "❓" ;;
+            esac
+          }
+
+          PENTEST_ICON=$(result_icon "${{ needs.pentest.result }}")
+          PR_ICON=$(result_icon "${{ needs.pr-review.result }}")
+          AUDIT_ICON=$(result_icon "${{ needs.dependency-audit.result }}")
+
+          SLACK_MESSAGE=$(cat <<EOF
+          {
+            "channel": "C0ATQEBLT89",
+            "text": "🌙 *Nightly AI Report — $(date -u +%Y-%m-%d)*",
+            "blocks": [
+              {
+                "type": "header",
+                "text": {
+                  "type": "plain_text",
+                  "text": "🌙 Nightly AI Report — $(date -u +%Y-%m-%d)"
+                }
+              },
+              {
+                "type": "section",
+                "fields": [
+                  {
+                    "type": "mrkdwn",
+                    "text": "*Payment API Pentest:*\n$PENTEST_ICON \`${{ needs.pentest.result }}\`"
+                  },
+                  {
+                    "type": "mrkdwn",
+                    "text": "*PR Review:*\n$PR_ICON \`${{ needs.pr-review.result }}\`"
+                  },
+                  {
+                    "type": "mrkdwn",
+                    "text": "*Dependency Audit:*\n$AUDIT_ICON \`${{ needs.dependency-audit.result }}\`"
+                  }
+                ]
+              },
+              {
+                "type": "section",
+                "text": {
+                  "type": "mrkdwn",
+                  "text": "<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View workflow run>"
+                }
+              }
+            ]
+          }
+          EOF
+          )
+
+          curl -X POST "${{ secrets.SLACK_WEBHOOK_URL }}" \
+            -H 'Content-Type: application/json' \
+            -d "$SLACK_MESSAGE"
